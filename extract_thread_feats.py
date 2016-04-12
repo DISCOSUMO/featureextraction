@@ -1,6 +1,7 @@
 # coding=utf-8
-# python extract_thread_feats.py ../dataconversion/Viva_forum/samples/106long20threads
-# python extract_thread_feats.py ../dataconversion/Viva_forum/samples/kankerthreads
+# python extract_thread_feats.py ../dataconversion/Viva_forum/samples/106long20threads 106long20threads.threadfeats.out
+# python extract_thread_feats.py ../dataconversion/Viva_forum/samples/kankerthreads kankerthreads.threadfeats.out
+# python extract_thread_feats.py ../dataconversion/GIST_FB/threads GIST_FB.threadfeats.out
 
 
 
@@ -33,11 +34,7 @@ from scipy.linalg import norm
 
 
 rootdir = sys.argv[1]
-#outfile = "kankerthreads.threadfeats.out"
-outfile = "106long20threads.threadfeats.out"
-#for subdir in os.listdir(rootdir) :
-#        for f in os.listdir(rootdir+"/"+subdir) :
-
+outfile = sys.argv[2]
 
 #postcounts = dict()
 
@@ -95,16 +92,18 @@ avgcossimwithprevious_column = list()
 sys.stderr.write("Read files in "+rootdir+"\n")
 for f in os.listdir(rootdir):
     if f.endswith("xml"):
-        #postcount = postcounts[f]
-        #postcount_column.append(postcount)
-        print f
+
         tree = ET.parse(rootdir+"/"+f)
         root = tree.getroot()
+        print f
+
 
         for thread in root:
             threadid = thread.get('id')
             category = thread.find('category').text
             title = thread.find('title').text
+            if title is None:
+                title = ""
 
             termvectorforthread = dict()  # key is term, value is termcount for full thread
             termvectors = defaultdict(dict)  # key is postid, value is dict with term -> termcount for post
@@ -114,6 +113,8 @@ for f in os.listdir(rootdir):
             postid_for_postcount = dict()
 
             #sys.stderr.write(f+"\t"+title+"\n")
+
+
             threadid_column.append(threadid)
             title_column.append(title)
             length_of_title_column.append(len(title))
@@ -141,6 +142,11 @@ for f in os.listdir(rootdir):
                         continue
 
                     bodyofpost = post.find('body').text
+                    #if threadid == "160543202978_10152800850187979":
+                    #   print threadid, postid, bodyofpost
+
+                    if bodyofpost is None:
+                        bodyofpost = ""
                     words = tokenize(bodyofpost)
                     if bodyofpost is not None:
                         sum_postlength += len(bodyofpost)
