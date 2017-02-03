@@ -1,47 +1,36 @@
 # coding=utf-8
-# python extract_post_feats.py ../dataconversion/Viva_forum/samples/106long20threads 106long20threads.postfeats.norm.out
-# python extract_post_feats.py ../dataconversion/Viva_forum/samples/20randomthreads 20randomthreads.postfeats.norm.out
-# python extract_post_feats.py ../dataconversion/GIST_FB/threads/ gistfb.postfeats.norm.out
-# python extract_post_feats.py ../dataconversion/GIST_FB/smallsample/ gistfb.postfeats.norm.smallsample.out
+# python extract_sent_feats_norm-per-thread.py ../dataconversion/GIST_FB/samples/100long10threads ../annotation/annotations/selected_posts_sents.students.withoutduplicates.txt gistfb.sentfeats.students.norm.out
 
 # Feature extraction.
-# + (a) position in the thread (absolute, relative)
-# + (b) popularity (#responses)
-# + (c) representativeness for the thread (cosine similarity for tf-idf weighted vector representations of post and thread/title)
-# + (d) readability (wordcount, uniquewordcount,type-token ratio, relative punctuation count, average word length, avg sent length
-# - Flesch(-Douma) statistic for Readability Ease))
+# + (a) position of the post in the thread (absolute, relative); position of the sentence in the post (absolute, relative)
+# + (b) popularity (#responses) of post
+# + (c) representativeness of the post for the thread (cosine similarity for tf-idf weighted vector representations of post and thread/title);
+#       representativeness of the sentence for the post (cosine similarity for tf-idf weighted vector representations of sentence and post)
+# + (d) readability (wordcount, uniquewordcount,type-token ratio, relative punctuation count, average word length, sent length)
 # + (e) prominence of author (# relative posts in thread)
 
 
 import os
 import sys
-reload(sys)
-sys.setdefaultencoding('utf8')
 import re
-import math
 import string
 import operator
 import functools
 import numpy
 from scipy.linalg import norm
 import time
+import math
 
-import fileinput
-
-from collections import defaultdict
 import xml.etree.ElementTree as ET
-# from xml.dom import minidom
 
 rootdir = sys.argv[1]
-featfilename = sys.argv[2]
-annotationsfile = "../annotation/annotations/selected_posts.txt"
+featfilename = sys.argv[3]
+annotationsfile = sys.argv[2]
 
 
 
 
-focususers = ("F.","Niree Bakker","Judith","Lian Bouten")
-
-print time.clock(), "\t", "read annotations"
+print (time.clock(), "\t", "read annotations")
 
 ########### FROM ANALYZE_ANNOTATIONS.PY ###########
 threads_per_user = dict()
@@ -55,74 +44,73 @@ nrselecteds_per_thread = dict()
 nrselecteds_per_user = dict()
 with open(annotationsfile,'r') as annotations:
     for line in annotations:
-        columns = line.split("\t")
-        #Mon Jan 25 12:09:12 2016	Nikki de Groot	19	female	not	nikkidegroot24@gmail.com	97963
+        columns = line.rstrip().split("\t")
+        # Mon Jun 13 17:33:13 2016	goortmer	71	male	gerard.vanoortmerssen@gmail.com		160543202978_10150575185027979	 10150575214752979_s1 10150575819727979_s0 10150575819727979_s1 10150575819727979_s2 10150575819727979_s3 10150575819727979_s4 10150575819727979_s5 10150575819727979_s6 10150575819727979_s7 10150575823002979_s1 10150575823002979_s3 10150575823002979_s4 10150577430722979_s2 10150577430722979_s3 10150578450477979_s0 10150578450477979_s1 10150578450477979_s2 10150578450477979_s2 10150578450477979_s3
+        timestamp = columns[0]
         name = columns[1]
-        email = columns[5]
-        if len(columns) > 7:
-            # Mon Jan 25 12:14:31 2016	Nikki de Groot	19	female	not	nikkidegroot24@gmail.com	97963	103511	 2 3 6 7 8 9 10 12 13 22 24 28	2	4
+        age = columns[2]
+        gender = columns[3]
+        email = columns[4]
+        threadid = columns[6]
+        selected = columns[7]
+        #comments = columns[8]
+        print (threadid)
 
-            threadid = columns[7]
-            selected = columns[8]
+        if (re.match(".*[a-zA-Z0-9].*",name) and not re.match(r'(?i).*(test|suzan).*',name)) \
+                and (not re.match(r'voorbeeld',threadid) and (not threadid == "239355") and (not threadid == "250167")):
+            #print name
+            threadsforuser = dict()
+            if name in threads_per_user:
+                threadsforuser = threads_per_user[name]
+            if threadid not in threadsforuser:
+                threadsforuser[threadid] = 1
+                #ann.write(line)
+                nrselecteds = list()
+                threads_per_user[name] = threadsforuser
+                selected_def = dict()
+                postids = selected.split(" ")
+                removeatpos = dict()
+                pos=0
+                for postid in postids:
+                    if "-" in postid:
+                        removeid = re.sub("-","",postid)
+                        removeatpos[removeid] = pos
+                    pos += 1
+                pos = 0
+                for postid in postids:
+                    if re.match("[0-9a-zA-Z_-]+",postid):
+                        if postid in removeatpos:
+                            if pos > removeatpos[postid]:
+                                selected_def[postid] =1
+                        else :
+                            selected_def[postid]=1
+                            #print (postid)
 
-            if (re.match(".*[a-zA-Z0-9].*",name) and not re.match(r'(?i).*(test|suzan).*',name)) \
-                    and (not re.match(r'voorbeeld',threadid) and (not threadid == "239355") and (not threadid == "250167")):
-                #print name
-                threadsforuser = dict()
-                if threads_per_user.has_key(name):
-                    threadsforuser = threads_per_user[name]
-                if not threadsforuser.has_key(threadid):
-                    threadsforuser[threadid] = 1
-                    #ann.write(line)
-                    nrselecteds = list()
-                    threads_per_user[name] = threadsforuser
-                    selected_def = dict()
-                    postids = selected.split(" ")
-                    removeatpos = dict()
-                    pos=0
-                    for postid in postids:
-                        if "-" in postid:
-                            removeid = re.sub("-","",postid)
-                            removeatpos[removeid] = pos
-                        pos += 1
-                    pos = 0
-                    for postid in postids:
-                        if re.match("[0-9]+",postid):
-                            if postid in removeatpos:
-                                if pos > removeatpos[postid]:
-                                    selected_def[postid] =1
-                            else :
-                                selected_def[postid]=1
+                selected_per_thread_and_user[(threadid,name)] = selected_def
+                nrselected = len(selected_def)
+                nrselecteds.append(nrselected)
+                nrselecteds_per_thread[threadid] = nrselecteds
 
-                    selected_per_thread_and_user[(threadid,name)] = selected_def
-                    nrselected = len(selected_def)
-                    nrselecteds.append(nrselected)
-                    nrselecteds_per_thread[threadid] = nrselecteds
-
-                    nrselecteds_user = list()
-                    if nrselecteds_per_user.has_key(name):
-                        nrselecteds_user = nrselecteds_per_user[name]
-                    nrselecteds_user.append(nrselected)
-                    nrselecteds_per_user[name] = nrselecteds_user
-                    #print selected, selected_def
-                #else:
-                #    sys.stderr.write("Warning: user "+email+" got thread "+threadid+" twice!\n")
+                nrselecteds_user = list()
+                if name in nrselecteds_per_user:
+                    nrselecteds_user = nrselecteds_per_user[name]
+                nrselecteds_user.append(nrselected)
+                nrselecteds_per_user[name] = nrselecteds_user
 
 
-print time.clock(), "\t", "collect postvotes per thread"
+print (time.clock(), "\t", "collect postvotes per thread")
 
 postvotes_per_thread = dict()
 #out.write("\nthreadid\tuser\t# of selected posts\n")
-for (threadid,user) in selected_per_thread_and_user.keys():
+for (threadid,user) in selected_per_thread_and_user:
     selected = selected_per_thread_and_user[(threadid,user)]
-    #print threadid, user, selected_per_thread_and_user[(threadid,user)], len(selected.keys())
-    #out.write(threadid+"\t"+user+"\t"+str(len(selected.keys()))+"\n")
+    #print (threadid, user, selected_per_thread_and_user[(threadid,user)], len(selected))
 
     postvotes = dict()
-    if threadid in postvotes_per_thread.keys():
+    if threadid in postvotes_per_thread:
         postvotes = postvotes_per_thread[threadid]
     for postid in selected:
-        if postid in postvotes.keys():
+        if postid in postvotes:
             postvotes[postid] += 1
         else:
             postvotes[postid] =1
@@ -130,6 +118,10 @@ for (threadid,user) in selected_per_thread_and_user.keys():
 
 ###########
 
+#for threadid in postvotes_per_thread:
+#    print (threadid,postvotes_per_thread[threadid])
+
+#print (time.clock(), "\t", "finished")
 
 
 def replace_quote(postcontent):
@@ -210,7 +202,7 @@ def split_into_sentences(text):
 
 def count_punctuation(t):
     punctuation = string.punctuation
-    punctuation_count = len(filter(functools.partial(operator.contains, punctuation), t))
+    punctuation_count = len(list(filter(functools.partial(operator.contains, punctuation), t)))
     textlength = len(t)
     relpc = 0
     if textlength>0:
@@ -247,17 +239,17 @@ def printTopNPosts(d, n):
         if i > n:
             break
         else:
-            print pid, d[pid]
+            print (pid, d[pid])
             # print postid, bodies[pid], d[pid]
 
 
 def getTopNAuthors(d, n, minnrofposts):
     topauthors = list()
     i = 0
-    print "    Top" + str(n) + " authors:"
+    print ("    Top" + str(n) + " authors:")
     for aut in sorted(d, key=d.get, reverse=True):
         i += 1
-        print "\t" + aut, d[aut]
+        print ("\t" + aut, d[aut])
         if i > n or d[aut] < minnrofposts:
             break
         else:
@@ -270,36 +262,31 @@ def normalizeVector(termvector):
     for component in termvector.values():
         sumofsquares = sumofsquares + component * component
     vectorlength = math.sqrt(sumofsquares)
-    for term in termvector.keys():
+    for term in termvector:
         normvalue = termvector[term] / vectorlength
         termvector[term] = normvalue
     return termvector
 
 
 def fast_cosine_sim(a, b):
+    #print (a)
     if len(b) < len(a):
         a, b = b, a
     up = 0
-    for key, a_value in a.iteritems():
-        b_value = b.get(key, 0)
+    a_value_array = []
+    b_value_array = []
+    for key in a:
+        # noinspection PyUnresolvedReferences
+        a_value = a[key]
+        # noinspection PyUnresolvedReferences
+        b_value = b[key]
+        a_value_array.append(a_value)
+        b_value_array.append(b_value)
         up += a_value * b_value
     if up == 0:
         return 0
-    return up / norm(a.values()) / norm(b.values())
+    return up / norm(a_value_array) / norm(b_value_array)
 
-
-columns = dict() # key is feature name, value is dict with key (threadid,postid) and value the feature value
-
-def addvaluestocolumnsoverallthreads(dictionary,feature):
-    global columns
-    columndict = dict()
-    if feature in columns: # if this is not the first thread, we already have a columndict for this feature
-        columndict = columns[feature] # key is (threadid,postid) and value the feature value
-    for (threadid,postid) in dictionary:
-        value = dictionary[(threadid,postid)]
-        columndict[(threadid,postid)] = value
-    #print feature, columndict
-    columns[feature] = columndict
 
 def standardize_values(columndict,feature):
     values = list()
@@ -313,20 +300,30 @@ def standardize_values(columndict,feature):
         normvalue = 0.0
         if stdev == 0.0:
             stdev = 0.000000000001
-            print "stdev is 0! ", feature, value, mean, stdev
+            print ("stdev is 0! ", feature, value, mean, stdev)
         #if value != 0:
         normvalue = (float(value)-float(mean))/float(stdev)
         normdict[(threadid,postid)] = normvalue
-#        if feature == "noofupvotes":
-#           print threadid,postid, feature, float(value), mean, stdev, normvalue, len(columndict)
+        #if feature == "noofupvotes":
+        #   print (threadid,postid, feature, float(value), mean, stdev, normvalue, len(columndict))
+        if feature == "noresponses" and normvalue > 0:
+           print (threadid,postid, feature, float(value), mean, stdev, normvalue, len(columndict))
 
     return normdict
 
-sys.stderr.write("Read files in "+rootdir+"\n")
+print (time.clock(), "\tRead files in "+rootdir)
 
 #for focususer in focususers:
 
 #featfile = open("postfeats."+focususer+".out",'w')
+
+featfile = open(featfilename,'w')
+
+featnames = ("threadid","postid","abspos_post","relpos_post","abspos_sent","relpos_sent","noresponses","noofupvotes","cosinesimwthread_post","cosinesimwtitle_post","cosinesimwthread_sent","cosinesimwtitle_sent","wordcount","uniquewordcount","ttr","relpunctcount","avgwordlength","sentlength","relauthorcountsinthread")
+
+for featname in featnames:
+    featfile.write(featname+"\t")
+featfile.write("votes_for_this_post\n")
 
 openingpost_for_thread = dict() # key is threadid, value is id of opening post
 postids_dict = dict() # key is (threadid,postid), value is postid. Needed for pasting the columns at the end
@@ -347,14 +344,19 @@ avgnrsyllablesinwords = dict() # key is (threadid,postid), value is average word
 avgsentlengths = dict() # key is (threadid,postid), value is average word length (nr of words)
 readabilities = dict() # key is (threadid,postid), value is readability
 bodies = dict()  # key is (threadid,postid), value is content of post
-
+sentlengths_sent = dict() # key is (threadid, sentid), value is length of sentence
+abspositions_sent = dict() # key is (threadid, sentid), value is absolute position of sentence in post
+relpositions_sent = dict() # key is (threadid, sentid), value is relative  position of sentence in post
+cosinesimilaritiesthread_sent = dict() # key is (threadid,sentid), value is cossim with term vector for complete thread
+cosinesimilaritiestitle_sent = dict() # key is (threadid,sentid), value is cossim with term vector for title
 #print time.clock(), "\t", "go through files"
 
 for f in os.listdir(rootdir):
     if f.endswith("xml"):
-        print time.clock(), "\t", f
+        print (time.clock(), "\t", f)
 
-        postids = list()
+        #postids = list()
+        postids_for_this_thread = dict() #key is postid or sentid, value = 1
         termvectors = dict()  # key is postid, value is dict with term -> termcount for post
         termvectorforthread = dict()  # key is term, value is termcount for full thread
         termvectorfortitle = dict()  # key is term, value is termcount for title
@@ -412,12 +414,13 @@ for f in os.listdir(rootdir):
                 if 1 < postcount <= 51:
                     # don't include opening post in feature set
                     # and include at most 50 responses
-                    postids.append(postid)
+                    #postids.append(postid)
                     postids_dict[(threadid,postid)] = postid
+                    postids_for_this_thread[postid] = 1
                     threadids[(threadid,postid)] = threadid
                     parentid = post.find('parentid').text
 
-                    if parentid != openingpost_for_thread[threadid]:
+                    if parentid != openingpost_for_thread[threadid] and parentid != threadid:
                         # do not save responses for openingpost because openingpost will not be in feature file
                         # (and disturbs the column for standardization)
                         if (threadid,parentid) in responsecounts:
@@ -425,7 +428,7 @@ for f in os.listdir(rootdir):
                         else:
                             responsecounts[(threadid,parentid)] = 1
                     #else:
-                        #print "don't add responsecounts because opening post:", parentid
+                        #print ("don't add responsecounts because opening post:", parentid)
 
                     upvotes = 0
                     upvotesitem = post.find('upvotes')
@@ -468,11 +471,53 @@ for f in os.listdir(rootdir):
                     sentences = split_into_sentences(body)
                     sentlengths = list()
 
+                    sid=0
+
                     for s in sentences:
+
+                        # calculate separate sentence feature values
+                        sentid = postid+'_s'+str(sid)
+                        threadids[(threadid,sentid)] = threadid
+
+                        postids_dict[(threadid,sentid)] = sentid
+                        #postids.append(sentid)
+                        postids_for_this_thread[sentid] = 1
                         sentwords = tokenize(s)
                         nrofwordsinsent = len(sentwords)
+                        sentlengths_sent[(threadid,sentid)] = nrofwordsinsent
+                        abspos_sent = sid+1
+                        abspositions_sent[(threadid,sentid)] = abspos_sent
+                        relpos_sent = abspos_sent/len(sentences)
+                        relpositions_sent[(threadid,sentid)] = relpos_sent
+
+                        sentwords = tokenize(s)
+                        worddict = dict()
+                        uniquewords = dict()
+                        wordlengths = list()
+                        for word in sentwords:
+                            uniquewords[word] = 1
+                            wordlengths.append(len(word))
+                            if sentid in termvectors:
+                                worddict = termvectors[sentid]
+                            if word in worddict:
+                                worddict[word] += 1
+                            else:
+                                worddict[word] = 1
+                            termvectors[sentid] = worddict
+
+
+                        wordcounts[(threadid,sentid)] = len(sentwords)
+                        uniquewordcounts[(threadid,sentid)] = len(uniquewords)
+                        typetokenratio = 0
+                        if wordcounts[(threadid,sentid)] > 0:
+                            typetokenratio = float(len(uniquewords)) / float(wordcounts[(threadid,sentid)])
+                            avgwordlengths[(threadid,postid)] = numpy.mean(wordlengths)
+                        typetokenratios[(threadid,sentid)] = typetokenratio
+                        relpunctcounts[(threadid,sentid)] = count_punctuation(s)
+
                         #print s, nrofwordsinsent
                         sentlengths.append(nrofwordsinsent)
+                        sid +=1
                     if len(sentences) > 0:
                         avgsentlength = numpy.mean(sentlengths)
                         avgsentlengths[(threadid,postid)] = avgsentlength
@@ -504,7 +549,7 @@ for f in os.listdir(rootdir):
                             worddict[word] = 1
                         termvectors[postid] = worddict
 
-                    uniquewordcount = len(uniquewords.keys())
+                    uniquewordcount = len(uniquewords)
                     uniquewordcounts[(threadid,postid)] = uniquewordcount
                     readabilities[(threadid,postid)] = 0
 
@@ -556,10 +601,28 @@ for f in os.listdir(rootdir):
 
         #    for term in termvectorforthread:
         #        print(postid,term,termvectors[postid][term])
-            cossimthread = fast_cosine_sim(termvectors[postid], termvectorforthread)
-            cossimtitle = fast_cosine_sim(termvectors[postid], termvectorfortitle)
-            cosinesimilaritiesthread[(threadid,postid)] = cossimthread
-            cosinesimilaritiestitle[(threadid,postid)] = cossimtitle
+
+
+
+            if "_s" in postid:
+                # calculate cossim for sentence itself
+                cossimthread = fast_cosine_sim(termvectors[postid], termvectorforthread)
+                cossimtitle = fast_cosine_sim(termvectors[postid], termvectorfortitle)
+                cosinesimilaritiesthread_sent[(threadid,postid)] = cossimthread
+                cosinesimilaritiestitle_sent[(threadid,postid)] = cossimtitle
+                postid_for_sentid = re.sub("_s[0-9]+","",postid)
+                # and add the cossim of the post it is embedded in as separate feature
+                cossimthread = fast_cosine_sim(termvectors[postid_for_sentid], termvectorforthread)
+                cossimtitle = fast_cosine_sim(termvectors[postid_for_sentid], termvectorfortitle)
+                cosinesimilaritiesthread[(threadid,postid)] = cossimthread
+                cosinesimilaritiestitle[(threadid,postid)] = cossimtitle
+            else:
+                # if postid is not a sentence then only calculate the cossim for the postid
+                cossimthread = fast_cosine_sim(termvectors[postid], termvectorforthread)
+                cossimtitle = fast_cosine_sim(termvectors[postid], termvectorfortitle)
+                cosinesimilaritiesthread[(threadid,postid)] = cossimthread
+                cosinesimilaritiestitle[(threadid,postid)] = cossimtitle
+
 
             #print postid, cossimthread
 
@@ -575,17 +638,18 @@ for f in os.listdir(rootdir):
         #print time.clock(), "\t", "add missing feature values"
 
 
-        for postid in postids:
-            #print postid, abspositions[(threadid,postid)]
+        for postid in postids_for_this_thread:
+            #print (postid)
             if not (threadid,postid) in cosinesimilaritiesthread:
                 cosinesimilaritiesthread[(threadid,postid)] = 0.0
             if not (threadid,postid) in cosinesimilaritiestitle:
                 cosinesimilaritiestitle[(threadid,postid)] = 0.0
             if not (threadid,postid) in responsecounts:
                 # don't store the counts for the openingpost
-                #print "postid not in responsecounts", postid, "opening post:", openingpost_for_thread[threadid]
-                responsecounts[(threadid,postid)] = 0
-            #else:
+                #print ("postid not in responsecounts", postid, "opening post:", openingpost_for_thread[threadid])
+                responsecounts[(threadid,postid)] = 0.0
+            else:
+                print ("postid in responsecounts",threadid,postid,responsecounts[(threadid,postid)])
                 #sel = 0
                 #if postid in selected_by_focususer:
                 #    sel = 1
@@ -595,88 +659,79 @@ for f in os.listdir(rootdir):
 
         #print time.clock(), "\t", "add feature values to columns for all threads"
 
-        addvaluestocolumnsoverallthreads(threadids, "threadid")
-        addvaluestocolumnsoverallthreads(postids_dict, "postid")
+        #print (time.clock(), "\t", "standardize feat values")
+        columns = dict() # key is feature name, value is dict with key (threadid,postid) and value the feature value
 
-        addvaluestocolumnsoverallthreads(abspositions, "abspos")
-        addvaluestocolumnsoverallthreads(relpositions, "relpos")
-        addvaluestocolumnsoverallthreads(responsecounts, "noresponses")
-        addvaluestocolumnsoverallthreads(upvotecounts, "noofupvotes")
-        addvaluestocolumnsoverallthreads(cosinesimilaritiesthread, "cosinesimwthread")
-        addvaluestocolumnsoverallthreads(cosinesimilaritiestitle, "cosinesimwtitle")
-        addvaluestocolumnsoverallthreads(wordcounts, "wordcount")
-        addvaluestocolumnsoverallthreads(uniquewordcounts, "uniquewordcount")
-        addvaluestocolumnsoverallthreads(typetokenratios, "ttr")
-        addvaluestocolumnsoverallthreads(relpunctcounts, "relpunctcount")
-        addvaluestocolumnsoverallthreads(avgwordlengths, "avgwordlength")
-        addvaluestocolumnsoverallthreads(avgsentlengths, "avgsentlength")
-        addvaluestocolumnsoverallthreads(relauthorcountsinthreadforpost,"relauthorcountsinthread")
+        columns["threadid"] = threadids
+        columns["postid"] = postids_dict
+        columns["abspos_post"] = abspositions
+        columns["relpos_post"] = relpositions
+        columns["abspos_sent"] = abspositions_sent
+        columns["relpos_sent"] = relpositions_sent
+        columns["noresponses"] = responsecounts
+        columns["noofupvotes"] = upvotecounts
+        columns["cosinesimwthread_post"] = cosinesimilaritiesthread
+        columns["cosinesimwtitle_post"] = cosinesimilaritiestitle
+        columns["cosinesimwthread_sent"] = cosinesimilaritiesthread_sent
+        columns["cosinesimwtitle_sent"] = cosinesimilaritiestitle_sent
+        columns["wordcount"] = wordcounts
+        columns["uniquewordcount"] = uniquewordcounts
+        columns["ttr"] = typetokenratios
+        columns["relpunctcount"] = relpunctcounts
+        columns["avgwordlength"] = avgwordlengths
+        columns["avgsentlength"] = avgsentlengths
+        columns["sentlength"] = sentlengths_sent
+        columns["relauthorcountsinthread"] = relauthorcountsinthreadforpost
+        columns_std = dict()
 
+        for featurename in featnames:
+            columndict = []
+            if featurename in columns:
+                columndict = columns[featurename]
+            else:
+                print("featurename",featurename, "is not in columns dictionary")
 
-
-        #else:
-        #    print "WARNING:", threadid, postid, "missing cosine sim", bodies[(threadid,postid)]
-        #print threadid, postid, relpositions[(threadid,postid)], responsecounts[(threadid,postid)], wordcounts[(threadid,postid)], uniquewordcounts[(threadid,postid)], typetokenratios[(threadid,postid)]
-        #print threadid, postid
-
-
-columns_std = dict()
-
-featnames = ("threadid","postid","abspos","relpos","noresponses","noofupvotes","cosinesimwthread","cosinesimwtitle","wordcount","uniquewordcount","ttr","relpunctcount","avgwordlength","avgsentlength","relauthorcountsinthread")
-
-print time.clock(), "\t", "standardize feat values"
-
-
-for featurename in featnames:
-    columndict = columns[featurename]
-
-    columndict_with_std_values = columndict
-    if featurename != "postid" and featurename != "threadid":
-        columndict_with_std_values = standardize_values(columndict,featurename)
-    columns_std[featurename] = columndict_with_std_values
+            columndict_with_std_values = columndict
+            if featurename != "postid" and featurename != "threadid":
+                columndict_with_std_values = standardize_values(columndict,featurename)
+            columns_std[featurename] = columndict_with_std_values
 
 
-#featfile.write("threadid\tpostid\tabspos\trelpos\tnoresponses\tnoofupvotes\tcosinesimwthread\tcosinesimwtitle\twordcount\t"
-#           "uniquewordcount\tttr\trelpunctcount\tavgwordlength\tavgsentlength"
-           #"\treadability"
-#           "\trelauthorcountsinthread"
-           #"\tnrofvotes
-#           "\n")
+        for postid in postids_for_this_thread:
+            if "_s" in postid:
+                for featname in featnames:
+                    columndict_std = columns_std[featname]
+                    #if featname == "noresponses":
+                        #print (featname, columndict_std)
+                    if (threadid,postid) in columndict_std:
+                        if featname == "noresponses" and columndict_std[(threadid,postid)] > 0:
+                            print (threadid,postid,featname,columndict_std[(threadid,postid)])
 
-featfile = open(featfilename,'w')
+                        featfile.write(str(columndict_std[(threadid,postid)])+"\t")
+                    else:
+                        postid_for_sentid = re.sub("_s[0-9]+","",postid)
+                        if (threadid,postid_for_sentid) in columndict_std:
+                            featfile.write(str(columndict_std[(threadid,postid_for_sentid)])+"\t")
+                        else:
+                            #featfile.write("NA\t")
+                            featfile.write("0.0\t")
+                            print ("not in columndict for feature", featname, ":", threadid, postid,"use 0.0")
 
-print time.clock(), "\t", "print feature file"
-
-
-for featname in featnames:
-    featfile.write(featname+"\t")
-featfile.write("\n")
-
-# DON'T STANDARDIZE:
-
-#for (threadid,postid) in threadids:
-#    for featname in featnames:
-#        columndict = columns[featname]
-        #print featname, column_std
-#        if (threadid,postid) in columndict:
-#            featfile.write(str(columndict[(threadid,postid)])+"\t")
-#        else:
-#            featfile.write("NA\t")
-#    featfile.write("\n")
-
-# DO STANDARDIZE:
+                #print threadid, postvotes_for_this_thread
+                votes_for_this_post = 0
+                if postid in postvotes_for_this_thread:
+                    votes_for_this_post = postvotes_for_this_thread[postid]
+                featfile.write(str(votes_for_this_post)+"\n")
 
 
-for (threadid,postid) in threadids:
-    for featname in featnames:
-        columndict_std = columns_std[featname]
-        #print featname, columndict_std
-        if (threadid,postid) in columndict_std:
-            featfile.write(str(columndict_std[(threadid,postid)])+"\t")
-        else:
-            featfile.write("NA\t")
-            print "not in columndict for feature", featname, ":", threadid, postid
-    featfile.write("\n")
+        #print (time.clock(), "\t", "print feature file")
+
+
+
+
+
+
+
 
 
 featfile.close()
